@@ -1,0 +1,207 @@
+###########################          Reading file   ##############################
+df<-read.csv(file = "cleangoogleplaystore.csv", header = TRUE)
+###########################  EDA -Below requires plyr and Hmisc ##################
+df$Size.K.<-as.numeric(df$Size.K.)
+df$Reviews<-as.numeric(df$Reviews)
+df$Rating<-as.numeric(df$Rating)
+df$Installs<-as.numeric(df$Installs)
+df$Price<-as.numeric(df$Price)
+df$Type<-as.numeric(df$Type)
+sum(is.na(df))
+library("plyr")
+library("dplyr")
+library("tidyverse")
+library("Hmisc")
+#Replace NAs with mean value by category
+df <- ddply(df, "Category", mutate, Rating = impute(Rating, mean))
+# Replacing "Varies with devic" with NA and then replacing with mean by category
+df$Size.K.[df$Size.K.=='Varies with devic']<-NA
+df <- ddply(df, "Category", mutate, Size.K. = impute(Size.K., mean))
+# Converting Price variable as Logical
+df$Type <- ifelse(df$Type =='Free',0,ifelse(df$Type =='Paid',1,0))
+sum(is.na(df)) # Just to confirm if any NAs
+#hist(df$Installs)hist(df$Price)hist(df$Reviews)hist(df$Rating)hist(df$Size.K.)
+#############Plotting Correlation Plot###################
+dfcorr <- df[c(3:6,8)]
+library(corrplot)
+M<-cor(dfcorr,method = 'pearson')
+M
+library(ggcorrplot)
+ggcorrplot(M, hc.order = TRUE, type = "lower",
+           lab = TRUE,title = "correlation table visualisation")
+###########################                 Some Visualization       ######################
+options(scipen=999)
+ggplot(df,aes(x=Category,y=Installs)) +
+  geom_bar(stat = "identity",width = 0.7,fill="skyblue")+
+  coord_flip()+
+  ggtitle("Total installs Of Each App Category")+
+  xlab("Category Name")+
+  ylab("Total Number of Installs")
+
+ggplot(df,aes(x=Category,y=Reviews)) +
+  geom_bar(stat = "identity",width = 0.7,fill="indianred")+
+  coord_flip()+
+  ggtitle("Total Reviews Of Each App Category")+
+  xlab("Category Name")+
+  ylab("Total Number of Reviews")
+
+ggplot(df,aes(x=Type,fill=Type)) +
+  geom_bar()+
+  ggtitle("Count of Each Type of App")+
+  xlab("Type of App")+
+  ylab("Count")
+#################Data Split#################################
+set.seed(12345)
+row<-nrow(df)
+split <-sample(row,row*.6, replace = FALSE)
+traindata <- df[split,]
+validdata <- df[-split,]
+
+#########################  Linear Regression for 1. Rating prediction ############
+linearmodelz1 <- lm(Rating ~ Reviews + Size.K. + Installs + Price + Type,data=traindata) 
+lmmodelz1summary <-summary(linearmodelz1)
+lmmodelz1summary
+par(mfrow=c(2,2))
+plot(linearmodelz1)
+
+lmPredmodelz1 <- predict(linearmodelz1, validdata, se.fit=TRUE)
+
+#MSE
+mean((validdata[,"Rating"] - lmPredmodelz1$fit)^2)
+
+#########################  Linear Regression for 2. Installs Prediction ############
+lmodel2 <- lm(Installs~ Reviews + Size.K. + Rating + Price + Type, data = traindata)
+summary(lmodel2)
+
+plot(lmodel2)
+lpred2 <- predict(lmodel2, newdata = validdata)
+lpred2
+summary(lpred2)
+
+rmse1 = sqrt(mean((validdata$Installs-lpred2)^2))
+rmse1
+#############  Random Forest for 2. Installs prediction##########
+library(randomForest)
+library(caret)
+library(e1071)
+library(Metrics)
+rfmodelins <- randomForest(Installs ~ Reviews + Size.K. + Rating + Price, mtry=3, importance= TRUE, traindata)
+rfmodelins
+
+importance(rfmodelins)
+plot(rfmodelins)
+
+rf.pred2 <- predict(rfmodelins, validdata)
+rf.pred2
+
+rmse2 = sqrt(mean((validdata$Installs-rf.pred2)^2))
+rmse2
+
+rfr2 = R2(validdata$Installs, rf.pred2, form = "traditional")
+#############  Support Vector Machine for 2. Installs prediction##########
+svmodel2 <- svm(Installs~ Reviews + Size.K. + Rating + Price, data = traindata)
+svmodel2
+
+svmpred2 <- predict(svmodel2, newdata = validdata)
+
+#Plot
+x = 1:length(validdata$Installs)
+plot(x, validdata$Installs, pch=18, col="red")
+lines(x, svmpred2, lwd="1", col="blue")
+
+mse = mean((validdata$Installs - predict(svmodel2))^2)
+mse
+mae = MAE(validdata$Installs, svmpred2)
+mae
+rmse = RMSE(validdata$Installs, svmpred2)
+rmse
+
+cat(" MAE:", mae, "\n", "MSE:", mse, "\n", "RMSE:", rmse)
+####################### for some Transormations ################
+library(caret)
+BoxCoxTrans(df$Installs, lambda = seq(-5, 5, 0.1))
+BoxCoxTrans(df$Rating, lambda = seq(-5, 5, 0.1))
+df$Rating <- df$Rating^4.1
+#df$Reviews <- log(df$Reviews)
+df$Size.K. <- df$Size.K.^0.3
+hist(df$Size.K.)
+
+#### Data split 
+set.seed(100)
+split <-sample(row,row*.6, replace = FALSE)
+rows <- createDataPartition(df$Rating, list = F, p = 0.7)
+traindata <- df[rows,]
+validdata <- df[-rows,]
+
+#############  Linear Regression for 1. Rating prediction (transformed data)##########
+linearmodel2 <- lm(Rating ~ Reviews + Size.K. + Installs + Price+Type,data=traindata)
+lmmodel2summary <-summary(linearmodel2)
+lmmodel2summary
+
+lmPredmodel2 <- predict(linearmodel2, validdata, se.fit=TRUE)
+
+par(mfrow=c(2,2))
+plot(linearmodel2)
+#MSE
+mean((validdata[,"Rating"] - lmPredmodel2$fit)^2)
+
+rfr2
+
+########### Cluster #############
+
+sum(is.na(df)) # Just to confirm if any NAs
+
+# Removing Categorical variables 
+Cluster_Data<-df[-c(1,2,7,9:11)]
+
+set.seed(20)  
+fviz_nbclust(Cluster_Data, kmeans, method = "wss") # Graph whih shows the bend 
+Gplay_Cluster <- kmeans(Cluster_Data[,1:5],3, nstart = 20)
+Gplay_Cluster$cluster
+
+# Table to show The Cluster and split for the three categories
+table(Gplay_Cluster$cluster, Clean_Data$Content.Rating)
+
+# --------------- SVM Model -----------------
+
+# we use e1071 package with svm() functions in this exercise
+install.packages("e1071")
+library(e1071)   
+library(tidyverse) 
+library(gridExtra)
+library(corrplot)
+library(leaps)
+library(glmnet)
+library(dplyr)
+library(plyr)
+library(Hmisc)
+
+
+SVM_Data<-df[-c(1,2,7,10:11)]
+
+#Building SVM Model
+n <- nrow(SVM_Data)  # Number of observations
+ntrain <- round(n*0.75)  # 75% for training set
+
+tindex <- sample(n, ntrain)   # Create a random index
+train_Gplay <- SVM_Data[tindex,]   # Create training set
+test_Gplay <- SVM_Data[-tindex,]   # Create test set
+
+svm1 <- svm(Content.Rating~., data=train_Gplay, 
+            method="C-classification", kernal="radial", 
+            gamma=0.1, cost=5)
+
+summary(svm1)
+svm1$SV 
+
+#Prediction
+prediction <- predict(svm1, test_Gplay)
+xtab <- table(test_Gplay$Content.Rating, prediction)
+xtab
+
+## Compute prediction accuracy
+(0+2057+9+3+14+0)/nrow(test_Gplay)
+
+#The accuracy of the Model is 80.45%
+
+
